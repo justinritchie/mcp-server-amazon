@@ -1,6 +1,6 @@
 import fs from 'fs'
 import puppeteer from 'puppeteer'
-import { COOKIES_FILE_PATH, AMAZON_COOKIES, IS_BROWSER_VISIBLE } from './config.js'
+import { COOKIES_FILE_PATH, getAmazonCookies, IS_BROWSER_VISIBLE } from './config.js'
 
 /** Get the current timestamp like "2024-06-06_15-30-45" */
 export function getTimestamp() {
@@ -41,9 +41,12 @@ export async function createBrowserAndPage(): Promise<{ browser: puppeteer.Brows
     defaultViewport: null,
   })
 
-  // Set cookies if available
-  if (AMAZON_COOKIES?.length > 0) {
-    await browser.setCookie(...AMAZON_COOKIES)
+  // Set cookies — re-read from disk on every browser launch so users can
+  // hot-swap marketplaces (or refresh expired session cookies) by clicking
+  // "Save" in the MCP Auth Bridge extension without restarting Claude Desktop.
+  const cookies = getAmazonCookies()
+  if (cookies?.length > 0) {
+    await browser.setCookie(...cookies)
     console.error('[INFO] Set Amazon cookies in the browser')
   } else {
     console.error('[WARN] No Amazon cookies found, proceeding without them')

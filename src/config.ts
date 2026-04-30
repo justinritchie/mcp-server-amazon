@@ -10,15 +10,20 @@ export const USE_MOCKS = false
 /** Export live scraping HTML to mocks for future use */
 export const EXPORT_LIVE_SCRAPING_FOR_MOCKS = true
 
-export const COOKIES_FILE_PATH = `${__dirname}/../amazonCookies.json`
 /**
- * Go to the Amazon website and log in to your account
- * Then export cookies as JSON using a browser extension like "Cookie-Editor"
- * and paste them in [amazonCookies.json](../amazonCookies.json)
- *
- * @see https://chromewebstore.google.com/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm?hl=fr
+ * Cookie file path. Defaults to a sibling `amazonCookies.json` in the repo root
+ * (the upstream layout). Override via the `AMAZON_COOKIES_FILE_PATH` env var to
+ * point at a shared cookies file outside the repo — e.g.,
+ * `~/.mcp-credentials/amazon-cookies.json` written to by the MCP Auth Bridge
+ * extension. This makes the server hot-swappable: clicking "Save Amazon CA" or
+ * "Save Amazon US" in the bridge popup updates that single file, and the next
+ * tool call picks up the new marketplace's cookies without a restart.
  */
-export const AMAZON_COOKIES: {
+export const COOKIES_FILE_PATH = process.env.AMAZON_COOKIES_FILE_PATH
+  ? process.env.AMAZON_COOKIES_FILE_PATH.replace(/^~/, process.env.HOME ?? '~')
+  : `${__dirname}/../amazonCookies.json`
+
+export type AmazonCookie = {
   domain: string
   expirationDate: number
   hostOnly: boolean
@@ -30,34 +35,50 @@ export const AMAZON_COOKIES: {
   session: boolean
   storeId: string | null
   value: string
-}[] = loadAmazonCookiesFile()
+}
+
+/**
+ * Read the Amazon cookies file fresh on every call.
+ *
+ * Upstream loaded cookies once at module-import time, which meant the MCP
+ * needed a Claude Desktop restart to pick up new cookies. This function
+ * re-reads on every invocation so the user can switch marketplaces (or
+ * refresh expired session cookies) by re-clicking "Save" in the auth bridge
+ * extension — no restart required.
+ *
+ * @see https://chromewebstore.google.com/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm
+ */
+export function getAmazonCookies(): AmazonCookie[] {
+  return loadAmazonCookiesFile() as AmazonCookie[]
+}
 
 /**
  * Extract the Amazon domain from cookies
  * Returns the domain without the leading dot (e.g., "amazon.com", "amazon.co.uk", "amazon.de")
  */
 export function getAmazonDomain(): string {
-  if (!AMAZON_COOKIES || AMAZON_COOKIES.length === 0) {
+  const cookies = getAmazonCookies()
+  if (!cookies || cookies.length === 0) {
     console.error('[WARN] No cookies found, using default amazon.com domain')
     return 'amazon.com'
   }
 
   // Find a cookie with domain starting with ".amazon."
-  const amazonCookie = AMAZON_COOKIES.find(cookie => 
+  const amazonCookie = cookies.find(cookie =>
     cookie.domain && cookie.domain.startsWith('.amazon.')
   )
 
   if (amazonCookie) {
     // Remove the leading dot from domain
-    const domain = amazonCookie.domain.startsWith('.') 
-      ? amazonCookie.domain.substring(1) 
+    const domain = amazonCookie.domain.startsWith('.')
+      ? amazonCookie.domain.substring(1)
       : amazonCookie.domain
     console.error(`[INFO] Detected Amazon domain from cookies: ${domain}`)
     return domain
   }
 
   // Fallback: try to find any cookie with "amazon" in the domain
-  const fallbackCookie = AMAZON_COOKIES.find(cookie => 
+  const fallbackCookie = cookies.find(cookie =>
     cookie.domain && cookie.domain.includes('amazon')
   )
 
